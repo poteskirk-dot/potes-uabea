@@ -5,35 +5,211 @@ on:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build Android 14 APK
     runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check source ZIP
+      - name: Find source ZIP
         shell: bash
         run: |
           set -e
-          ZIP="./Potes-UABEA-Android-Prepared-fixed.zip"
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: $ZIP was not found in the repository root."
-            echo ""
-            echo "ZIP files currently in repository:"
-            find . -maxdepth 1 -type f -name "*.zip" -print
+          echo "Files in repository:"
+          find . -maxdepth 2 -type f -print
+
+          ZIP=$(find . -maxdepth 2 -type f -name "*.zip" -print -quit)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: No ZIP file was found."
             exit 1
           fi
 
-          echo "Using ZIP: $ZIP"
+          echo "Using ZIP:"
+          echo "$ZIP"
+
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - name: Extract UABEA source
         shell: bash
         run: |
           set -e
+
           rm -rf source
+          mkdir -p source
+
+          unzip -q "$ZIP" -d source
+
+          echo "Extracted source:"
+          find source -maxdepth 3 -type f \
+            \( -name "*.csproj" -o -name "*.sln" \) \
+            -print
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT=$(find source -type f -name "UABEA.Android.csproj" -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj was not found."
+
+            echo ""
+            echo "C# projects found:"
+            find source -type f -name "*.csproj" -print
+
+            exit 1
+          fi
+
+          echo "Android project:"
+          echo "$PROJECT"
+
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Find UABEA solution directory
+        shell: bash
+        run: |
+          set -e
+
+          ROOT=$(dirname "$(find source -type f -name "UABEA-8.sln" -print -quit 2>/dev/null || true)")
+
+          if [ -z "$ROOT" ] || [ "$ROOT" = "." ]; then
+            ROOT=$(find source -type f -name "Directory.Build.props" -print -quit | xargs dirname)
+          fi
+
+          echo "UABEA root:"
+          echo "$ROOT"
+
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Upgrade project to Android 14
+        shell: bash
+        run: |
+          set -e
+
+          echo "Updating Android target..."
+
+          find source -type f \
+            \( -name "*.csproj" -o -name "*.props" -o -name "*.targets" \) \
+            -print0 | while IFS= read -r -d '' FILE; do
+
+              sed -i \
+                -e 's/net6\.0-android31\.0/net8.0-android34.0/g' \
+                -e 's/net6\.0-android31/net8.0-android34.0/g' \
+                "$FILE"
+
+          done
+
+          echo ""
+          echo "Android targets after update:"
+
+          grep -R -n \
+            "net8.0-android34.0" \
+            source \
+            --include="*.csproj" \
+            --include="*.props" \
+            --include="*.targets" \
+            || true
+
+      - name: Install .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Android workload
+        shell: bash
+        run: |
+          set -e
+
+          dotnet --info
+
+          dotnet workload install android
+
+      - name: Verify Android workload
+        shell: bash
+        run: |
+          set -e
+
+          dotnet workload list
+
+      - name: Restore Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Restoring:"
+          echo "$PROJECT"
+
+          dotnet restore \
+            "$PROJECT" \
+            -p:TargetFramework=net8.0-android34.0 \
+            -p:NuGetAudit=false
+
+      - name: Build Android 14 APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "Building Potes UABEA for Android 14..."
+
+          dotnet publish \
+            "$PROJECT" \
+            --configuration Release \
+            --framework net8.0-android34.0 \
+            --runtime android-arm64 \
+            --self-contained true \
+            -p:TargetFramework=net8.0-android34.0 \
+            -p:AndroidPackageFormats=apk \
+            -p:AndroidUseAapt2=true \
+            -p:AndroidLinkMode=None \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false \
+            -p:NuGetAudit=false
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for APK files..."
+
+          find source -type f -name "*.apk" -print
+
+          APK=$(find source -type f \
+            -name "*.apk" \
+            -path "*/publish/*" \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo ""
+            echo "No publish APK found."
+
+            echo ""
+            echo "All APK files:"
+            find source -type f -name "*.apk" -print
+
+            exit 1
+          fi
+
+          echo ""
+          echo "APK found:"
+          echo "$APK"
+
+          cp "$APK" "Potes-UABEA-Android14.apk"
+
+          echo ""
+          echo "Final APK:"
+          ls -lh "Potes-UABEA-Android14.apk"
+
+      - name: Upload Potes UABEA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Potes-UABEA-Android14
+          path: Potes-UABEA-Android14.apk
+          if-no-files-found: error
           mkdir -p source
           unzip -q "$ZIP" -d source
           echo "Source extracted."
