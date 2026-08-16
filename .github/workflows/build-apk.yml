@@ -31,18 +31,34 @@ jobs:
           mkdir source
           unzip -q "$ZIP" -d source
 
-          echo "Project files:"
-          find source -name '*.csproj' -print
-
-      - name: Fix Android target framework
+      - name: Find Android project
         run: |
-          echo "Changing Android target from API 21 to API 31..."
+          PROJECT=$(find source -name 'UABEA.Android.csproj' -print -quit)
 
-          find source -name '*.csproj' -type f -exec \
-            sed -i 's/net6\.0-android21\.0/net6.0-android31.0/g' {} \;
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj was not found."
+            find source -name '*.csproj' -print
+            exit 1
+          fi
 
-          echo "Android targets after modification:"
-          grep -R "net6.0-android" source --include='*.csproj' || true
+          echo "Android project: $PROJECT"
+          echo "ANDROID_PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Fix Android target frameworks
+        run: |
+          echo "Before:"
+          grep -R "android21\|android31\|TargetFramework" source \
+            --include='*.csproj' \
+            --include='*.props' || true
+
+          find source -type f \( -name '*.csproj' -o -name '*.props' \) \
+            -exec sed -i -E \
+            's/net6\.0-android[0-9.]*/net6.0-android31.0/g' {} \;
+
+          echo "After:"
+          grep -R "android21\|android31\|TargetFramework" source \
+            --include='*.csproj' \
+            --include='*.props' || true
 
       - name: Install .NET 6
         uses: actions/setup-dotnet@v4
@@ -53,28 +69,17 @@ jobs:
         run: |
           dotnet workload install android
 
-      - name: Find Android project
+      - name: Restore Android project
         run: |
-          PROJECT=$(find source -name 'UABEA.Android.csproj' -print -quit)
-
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: UABEA.Android.csproj not found."
-            find source -name '*.csproj' -print
-            exit 1
-          fi
-
-          echo "Android project: $PROJECT"
-          echo "ANDROID_PROJECT=$PROJECT" >> "$GITHUB_ENV"
-
-      - name: Restore
-        run: |
-          dotnet restore "$ANDROID_PROJECT"
+          dotnet restore "$ANDROID_PROJECT" \
+            -p:TargetFramework=net6.0-android31.0
 
       - name: Build Potes UABEA
         run: |
           dotnet publish "$ANDROID_PROJECT" \
             -c Release \
             -f net6.0-android31.0 \
+            -p:TargetFramework=net6.0-android31.0 \
             -p:AndroidPackageFormats=apk \
             -p:PublishTrimmed=false \
             -p:RunAOTCompilation=false
@@ -82,7 +87,6 @@ jobs:
       - name: Find APK
         run: |
           echo "Searching for APK..."
-
           find source -type f -name '*.apk' -print
 
           APK=$(find source -type f -name '*.apk' -print -quit)
@@ -92,7 +96,6 @@ jobs:
             exit 1
           fi
 
-          echo "APK found: $APK"
           cp "$APK" Potes-UABEA.apk
 
       - name: Upload Potes UABEA APK
