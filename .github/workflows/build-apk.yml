@@ -12,72 +12,179 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check ZIP
+      - name: Check source ZIP
+        shell: bash
         run: |
-          ZIP="$(find . -maxdepth 1 -type f -name 'Potes-UABEA-Android-Prepared*.zip' -print -quit)"
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: Potes UABEA ZIP not found."
-            find . -maxdepth 1 -type f -name '*.zip' -print
+          set -e
+
+          ZIP="./Potes-UABEA-Android-Prepared-fixed.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP was not found."
+            echo ""
+            echo "ZIP files currently in repository:"
+            find . -maxdepth 1 -type f -name "*.zip" -print
             exit 1
           fi
-          echo "Using: $ZIP"
+
+          echo "Using EXACT ZIP:"
+          echo "$ZIP"
+
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - name: Extract UABEA source
+        shell: bash
         run: |
+          set -e
+
           rm -rf source
-          mkdir source
+          mkdir -p source
+
           unzip -q "$ZIP" -d source
 
-      - name: Verify Android target
+          echo "Source extracted."
+
+      - name: Find Android project
+        shell: bash
         run: |
-          PROJECT="$(find source -name 'UABEA.Android.csproj' -print -quit)"
-          APP="$(find source -name 'UABEAvalonia.csproj' -print -quit)"
-          echo "Android project: $PROJECT"
-          echo "Avalonia project: $APP"
+          set -e
 
-          if [ -z "$PROJECT" ] || [ -z "$APP" ]; then
-            echo "ERROR: Required project files were not found."
+          PROJECT=$(find source -name "UABEA.Android.csproj" -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj was not found."
+            echo ""
+            echo "C# projects found:"
+            find source -name "*.csproj" -print
             exit 1
           fi
 
-          if grep -R -n 'net6.0-android21' source --include='*.csproj' --include='*.props' --include='*.targets'; then
-            echo "ERROR: Old Android 21 target found."
-            exit 1
-          fi
-
-          grep -R -n 'net6.0-android31.0' source --include='*.csproj' --include='*.props' --include='*.targets'
+          echo "Android project found:"
+          echo "$PROJECT"
 
           echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verify Android target
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking project files..."
+
+          echo ""
+          echo "Android target references:"
+          grep -R -n \
+            "TargetFramework\|TargetFrameworks\|net6.0-android" \
+            source \
+            --include="*.csproj" \
+            --include="*.props" \
+            --include="*.targets" || true
+
+          echo ""
+          echo "Checking for OLD Android 21 target..."
+
+          if grep -R -n \
+            "net6.0-android21" \
+            source \
+            --include="*.csproj" \
+            --include="*.props" \
+            --include="*.targets"; then
+
+            echo ""
+            echo "ERROR: Android 21 was found in the extracted source."
+            echo "The build has been stopped."
+            exit 1
+          fi
+
+          echo ""
+          echo "Android 21 was NOT found."
+
+          echo ""
+          echo "Checking for Android 31..."
+
+          if ! grep -R -n \
+            "net6.0-android31" \
+            source \
+            --include="*.csproj" \
+            --include="*.props" \
+            --include="*.targets"; then
+
+            echo ""
+            echo "ERROR: net6.0-android31 was not found."
+            exit 1
+          fi
+
+          echo ""
+          echo "Android 31 target confirmed."
 
       - name: Install .NET 6
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '6.0.x'
+          dotnet-version: "6.0.x"
 
       - name: Install Android workload
-        run: dotnet workload install android
+        shell: bash
+        run: |
+          set -e
+
+          dotnet workload install android
 
       - name: Restore Android project
+        shell: bash
         run: |
-          dotnet restore "$PROJECT"             -p:TargetFramework=net6.0-android31.0             -p:NuGetAudit=false             --ignore-failed-sources
+          set -e
 
-      - name: Build Potes UABEA APK
+          echo "Restoring:"
+          echo "$PROJECT"
+
+          dotnet restore "$PROJECT" \
+            -p:TargetFramework=net6.0-android31.0 \
+            -p:NuGetAudit=false
+
+      - name: Build Potes UABEA
+        shell: bash
         run: |
-          dotnet publish "$PROJECT"             -c Release             -f net6.0-android31.0             -p:TargetFramework=net6.0-android31.0             -p:AndroidPackageFormats=apk             -p:PublishTrimmed=false             -p:RunAOTCompilation=false             -p:NuGetAudit=false
+          set -e
+
+          echo "Building Potes UABEA..."
+
+          dotnet publish "$PROJECT" \
+            --configuration Release \
+            --framework net6.0-android31.0 \
+            -p:TargetFramework=net6.0-android31.0 \
+            -p:AndroidPackageFormats=apk \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false \
+            -p:NuGetAudit=false
 
       - name: Find APK
+        shell: bash
         run: |
-          APK="$(find source -type f -name '*.apk' -print -quit)"
+          set -e
+
+          echo "Searching for APK..."
+
+          find source -type f -name "*.apk" -print
+
+          APK=$(find source -type f -name "*.apk" -print -quit)
+
           if [ -z "$APK" ]; then
-            echo "ERROR: No APK was produced."
-            find source -type f | grep -E '\.apk$' || true
+            echo ""
+            echo "ERROR: Build completed but no APK was found."
             exit 1
           fi
-          echo "APK: $APK"
-          cp "$APK" Potes-UABEA.apk
 
-      - name: Upload Potes UABEA
+          echo ""
+          echo "APK found:"
+          echo "$APK"
+
+          cp "$APK" "Potes-UABEA.apk"
+
+          echo ""
+          echo "Final APK:"
+          ls -lh "Potes-UABEA.apk"
+
+      - name: Upload Potes UABEA APK
         uses: actions/upload-artifact@v4
         with:
           name: Potes-UABEA
