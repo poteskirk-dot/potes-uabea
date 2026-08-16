@@ -1,4 +1,4 @@
-name: Build Potes UABEA APK
+name: Build UABEA APK
 
 on:
   workflow_dispatch:
@@ -26,14 +26,138 @@ jobs:
         run: |
           set -e
 
-          ZIP="./Potes-UABEA-Android-Prepared-fixed.zip"
+          # Find the first available .zip file dynamically if specific name changes
+          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" -print -quit)
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: $ZIP was not found."
-            echo ""
-            echo "ZIP files currently in repository:"
-            find . -maxdepth 1 -type f -name "*.zip" -print
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: No ZIP file was found in the repository root."
             exit 1
+          fi
+
+          echo "Using source ZIP:"
+          echo "$ZIP"
+
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Extract UABEA source
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf source
+          mkdir -p source
+
+          unzip -q "$ZIP" -d source
+
+          echo "Source extracted."
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT=$(find source -name "UABEA.Android.csproj" -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj was not found."
+            echo ""
+            echo "C# projects found:"
+            find source -name "*.csproj" -print
+            exit 1
+          fi
+
+          echo "Android project found:"
+          echo "$PROJECT"
+
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Install .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Android workload
+        shell: bash
+        run: |
+          set -e
+
+          dotnet workload install android
+
+      - name: Update Target Framework to Android 14 (API 34)
+        shell: bash
+        run: |
+          set -e
+
+          # Update project files dynamically to net8.0-android34.0
+          find source -type f \( -name "*.csproj" -o -name "*.props" -o -name "*.targets" \) -exec sed -i 's/net6.0-android[0-9.]*/net8.0-android34.0/g' {} +
+          find source -type f \( -name "*.csproj" -o -name "*.props" -o -name "*.targets" \) -exec sed -i 's/net7.0-android[0-9.]*/net8.0-android34.0/g' {} +
+          find source -type f \( -name "*.csproj" -o -name "*.props" -o -name "*.targets" \) -exec sed -i 's/net8.0-android[0-9.]*/net8.0-android34.0/g' {} +
+
+          echo "Target framework updated to net8.0-android34.0"
+
+      - name: Restore Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Restoring:"
+          echo "$PROJECT"
+
+          dotnet restore "$PROJECT" \
+            -p:TargetFramework=net8.0-android34.0 \
+            -p:NuGetAudit=false
+
+      - name: Build UABEA
+        shell: bash
+        run: |
+          set -e
+
+          echo "Building UABEA..."
+
+          dotnet publish "$PROJECT" \
+            --configuration Release \
+            --framework net8.0-android34.0 \
+            -p:TargetFramework=net8.0-android34.0 \
+            -p:AndroidPackageFormats=apk \
+            -p:SupportedOSPlatformVersion=21.0 \
+            -p:TargetPlatformVersion=34.0 \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false \
+            -p:NuGetAudit=false
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for APK..."
+
+          find source -type f -name "*.apk" -print
+
+          APK=$(find source -type f -name "*.apk" -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo ""
+            echo "ERROR: Build completed but no APK was found."
+            exit 1
+          fi
+
+          echo ""
+          echo "APK found:"
+          echo "$APK"
+
+          cp "$APK" "UABEA.apk"
+
+          echo ""
+          echo "Final APK:"
+          ls -lh "UABEA.apk"
+
+      - name: Upload UABEA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UABEA-Android14
+          path: UABEA.apk
+          if-no-files-found: error
           fi
 
           echo "Using EXACT ZIP:"
