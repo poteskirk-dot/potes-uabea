@@ -28,14 +28,18 @@ jobs:
       - name: Install Android workload
         run: dotnet workload install android
 
-      - name: Build APK
-        run: |
-          PROJECT=$(find source -name "UABEA.Android.csproj" -print -quit)
-          dotnet publish "$PROJECT" \
-            -c Release \
-            -f net8.0-android \
-            -p:AndroidPackageFormats=apk \
-            -p:PublishTrimmed=false
+- name: Fix Android target
+  run: |
+    find source -name "*.csproj" -exec sed -i 's/net8.0-android31.0/net6.0-android31.0/g; s/net8.0-android/net6.0-android/g' {} \;
+
+- name: Build APK
+  run: |
+    PROJECT=$(find source -name "UABEA.Android.csproj" -print -quit)
+    dotnet publish "$PROJECT" \
+      -c Release \
+      -f net6.0-android31.0 \
+      -p:AndroidPackageFormats=apk \
+      -p:PublishTrimmed=false
 
       - name: Find APK
         run: |
