@@ -14,7 +14,7 @@ jobs:
       - name: Extract Potes UABEA
         run: |
           mkdir source
-          unzip -q Potes-UABEA-Android-Prepared.zip -d source
+          unzip -q Potes-UABEA-Android-Prepared(1).zip -d source
 
       - name: Install .NET 6
         uses: actions/setup-dotnet@v4
