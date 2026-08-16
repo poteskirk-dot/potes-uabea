@@ -12,64 +12,59 @@ jobs:
       - name: Get repository
         uses: actions/checkout@v4
 
-      - name: Show repository files
-        run: |
-          echo "Files in repository:"
-          ls -la
-
       - name: Find Potes UABEA ZIP
         run: |
           ZIP=$(find . -maxdepth 1 -type f -name 'Potes-UABEA-Android-Prepared*.zip' -print -quit)
 
           if [ -z "$ZIP" ]; then
             echo "ERROR: Potes UABEA ZIP was not found."
-            echo "ZIP files found:"
             find . -maxdepth 1 -type f -name '*.zip' -print
             exit 1
           fi
 
-          echo "Found: $ZIP"
+          echo "Found ZIP: $ZIP"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
       - name: Extract Potes UABEA
         run: |
           rm -rf source
           mkdir source
-
-          echo "Extracting: $ZIP"
           unzip -q "$ZIP" -d source
 
-          echo "Extracted files:"
-          find source -maxdepth 3 -type f \
-            \( -name '*.csproj' -o -name '*.sln' \) \
-            -print
+          echo "Project files:"
+          find source -name '*.csproj' -print
 
-      - name: Check Android project
+      - name: Fix Android target framework
         run: |
-          PROJECT=$(find source -name 'UABEA.Android.csproj' -print -quit)
+          echo "Changing Android target from API 21 to API 31..."
 
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: UABEA.Android.csproj was not found."
-            find source -name '*.csproj' -print
-            exit 1
-          fi
+          find source -name '*.csproj' -type f -exec \
+            sed -i 's/net6\.0-android21\.0/net6.0-android31.0/g' {} \;
 
-          echo "Android project:"
-          echo "$PROJECT"
-          echo "ANDROID_PROJECT=$PROJECT" >> "$GITHUB_ENV"
+          echo "Android targets after modification:"
+          grep -R "net6.0-android" source --include='*.csproj' || true
 
       - name: Install .NET 6
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '6.0.x'
 
-      - name: Show .NET version
-        run: |
-          dotnet --info
-
       - name: Install Android workload
         run: |
           dotnet workload install android
+
+      - name: Find Android project
+        run: |
+          PROJECT=$(find source -name 'UABEA.Android.csproj' -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj not found."
+            find source -name '*.csproj' -print
+            exit 1
+          fi
+
+          echo "Android project: $PROJECT"
+          echo "ANDROID_PROJECT=$PROJECT" >> "$GITHUB_ENV"
 
       - name: Restore
         run: |
@@ -97,9 +92,7 @@ jobs:
             exit 1
           fi
 
-          echo "Found APK:"
-          echo "$APK"
-
+          echo "APK found: $APK"
           cp "$APK" Potes-UABEA.apk
 
       - name: Upload Potes UABEA APK
