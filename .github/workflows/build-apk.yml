@@ -1,0 +1,110 @@
+name: Build Potes UABEA APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Get repository
+        uses: actions/checkout@v4
+
+      - name: Show repository files
+        run: |
+          echo "Files in repository:"
+          ls -la
+
+      - name: Find Potes UABEA ZIP
+        run: |
+          ZIP=$(find . -maxdepth 1 -type f -name 'Potes-UABEA-Android-Prepared*.zip' -print -quit)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: Potes UABEA ZIP was not found."
+            echo "ZIP files found:"
+            find . -maxdepth 1 -type f -name '*.zip' -print
+            exit 1
+          fi
+
+          echo "Found: $ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Extract Potes UABEA
+        run: |
+          rm -rf source
+          mkdir source
+
+          echo "Extracting: $ZIP"
+          unzip -q "$ZIP" -d source
+
+          echo "Extracted files:"
+          find source -maxdepth 3 -type f \
+            \( -name '*.csproj' -o -name '*.sln' \) \
+            -print
+
+      - name: Check Android project
+        run: |
+          PROJECT=$(find source -name 'UABEA.Android.csproj' -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj was not found."
+            find source -name '*.csproj' -print
+            exit 1
+          fi
+
+          echo "Android project:"
+          echo "$PROJECT"
+          echo "ANDROID_PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Install .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Show .NET version
+        run: |
+          dotnet --info
+
+      - name: Install Android workload
+        run: |
+          dotnet workload install android
+
+      - name: Restore
+        run: |
+          dotnet restore "$ANDROID_PROJECT"
+
+      - name: Build Potes UABEA
+        run: |
+          dotnet publish "$ANDROID_PROJECT" \
+            -c Release \
+            -f net6.0-android31.0 \
+            -p:AndroidPackageFormats=apk \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false
+
+      - name: Find APK
+        run: |
+          echo "Searching for APK..."
+
+          find source -type f -name '*.apk' -print
+
+          APK=$(find source -type f -name '*.apk' -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: No APK was produced."
+            exit 1
+          fi
+
+          echo "Found APK:"
+          echo "$APK"
+
+          cp "$APK" Potes-UABEA.apk
+
+      - name: Upload Potes UABEA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Potes-UABEA
+          path: Potes-UABEA.apk
+          if-no-files-found: error
