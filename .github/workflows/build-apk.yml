@@ -1,4 +1,4 @@
-name: Build UABEA APK
+name: Build Potes UABEA APK
 
 on:
   workflow_dispatch:
@@ -6,33 +6,142 @@ on:
 jobs:
   build:
     name: Build Android APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java Development Kit (JDK 17)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Check source ZIP
         shell: bash
         run: |
           set -e
+          ZIP="./Potes-UABEA-Android-Prepared-fixed.zip"
 
-          # Find the first available .zip file dynamically if specific name changes
-          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" -print -quit)
-
-          if [ -z "$ZIP" ]; then
-            echo "ERROR: No ZIP file was found in the repository root."
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP was not found in the repository root."
+            echo ""
+            echo "ZIP files currently in repository:"
+            find . -maxdepth 1 -type f -name "*.zip" -print
             exit 1
           fi
+
+          echo "Using ZIP: $ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Extract UABEA source
+        shell: bash
+        run: |
+          set -e
+          rm -rf source
+          mkdir -p source
+          unzip -q "$ZIP" -d source
+          echo "Source extracted."
+          find source -name "UABEA.Android.csproj" -print
+
+      - name: Find Android project
+        shell: bash
+        run: |
+          set -e
+          PROJECT=$(find source -name "UABEA.Android.csproj" -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: UABEA.Android.csproj was not found."
+            echo ""
+            echo "C# projects found:"
+            find source -name "*.csproj" -print
+            exit 1
+          fi
+
+          echo "Android project found: $PROJECT"
+          echo "PROJECT=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Verify Android target (must be net6.0-android31)
+        shell: bash
+        run: |
+          set -e
+          echo "Checking for old Android 21 target..."
+          if grep -R -n "net6.0-android21" source --include="*.csproj" --include="*.props" --include="*.targets"; then
+            echo "ERROR: Android 21 found – stopping."
+            exit 1
+          fi
+
+          echo "Checking for required Android 31 target..."
+          if ! grep -R -n "net6.0-android31" source --include="*.csproj" --include="*.props" --include="*.targets"; then
+            echo "ERROR: net6.0-android31 not found."
+            exit 1
+          fi
+          echo "Android 31 target confirmed."
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "6.0.x"
+
+      - name: Install Android workload
+        run: |
+          set -e
+          dotnet workload install android --skip-manifest-update
+
+      - name: Install Android SDK dependencies
+        shell: bash
+        run: |
+          set -e
+          # Let the .NET Android workload install the exact SDK pieces it needs
+          dotnet build "$PROJECT" \
+            -t:InstallAndroidDependencies \
+            -f net6.0-android31.0 \
+            -p:AcceptAndroidSdkLicenses=true \
+            -p:AndroidSdkDirectory=$HOME/android-sdk \
+            -p:JavaSdkDirectory=$JAVA_HOME || true
+
+      - name: Restore
+        shell: bash
+        run: |
+          set -e
+          dotnet restore "$PROJECT" \
+            -p:TargetFramework=net6.0-android31.0 \
+            -p:NuGetAudit=false
+
+      - name: Build / Publish APK
+        shell: bash
+        run: |
+          set -e
+          echo "Building Potes UABEA (Release APK)..."
+          dotnet publish "$PROJECT" \
+            --configuration Release \
+            --framework net6.0-android31.0 \
+            -p:TargetFramework=net6.0-android31.0 \
+            -p:AndroidPackageFormats=apk \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false \
+            -p:NuGetAudit=false \
+            -p:AndroidSdkDirectory=$HOME/android-sdk
+
+      - name: Locate and copy APK
+        shell: bash
+        run: |
+          set -e
+          echo "Searching for APK..."
+          find source -type f -name "*.apk" -print
+
+          APK=$(find source -type f -name "*.apk" -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: No APK was produced."
+            exit 1
+          fi
+
+          echo "APK found: $APK"
+          cp "$APK" "Potes-UABEA.apk"
+          ls -lh "Potes-UABEA.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Potes-UABEA
+          path: Potes-UABEA.apk
+          if-no-files-found: error
 
           echo "Using source ZIP:"
           echo "$ZIP"
