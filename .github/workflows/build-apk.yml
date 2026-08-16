@@ -12,9 +12,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Extract Potes UABEA
-        run: |
-          mkdir source
-          unzip -q Potes-UABEA-Android-Prepared(1).zip -d source
+  run: |
+    mkdir source
+    ZIP=$(find . -maxdepth 1 -type f -name 'Potes-UABEA-Android-Prepared*.zip' -print -quit)
+    echo "Using ZIP: $ZIP"
+    unzip -q "$ZIP" -d source
 
       - name: Install .NET 6
         uses: actions/setup-dotnet@v4
